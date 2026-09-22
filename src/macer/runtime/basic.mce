@@ -1,0 +1,44 @@
+// libs/basic.mce
+// Macer 语言基础内置库（Basic Standard Library）
+// 这些声明由编译器内置，用户程序无需 import 即可使用。
+
+// ============ 内置函数声明 ============
+public func print(value: Any) -> Void;
+public func len(s: Any) -> Int;
+public func str(v: Any) -> String;
+public func int(v: Any) -> Int;
+public func float(v: Any) -> Float;
+public func abs(v: Any) -> Float;
+
+
+// ============ 内置工具类 ============
+
+public class Math {
+    public PI: Float = 3.141592653589793;
+
+    public func max(a: Int, b: Int) -> Int {
+        if a > b {
+            return a;
+        } else {
+            return b;
+        }
+    }
+
+    public func min(a: Int, b: Int) -> Int {
+        if a < b {
+            return a;
+        } else {
+            return b;
+        }
+    }
+}
+
+public class StringUtils {
+    public func concat(a: String, b: String) -> String {
+        return a + b;
+    }
+
+    public func isEmpty(s: String) -> Bool {
+        return len(s) == 0;
+    }
+}

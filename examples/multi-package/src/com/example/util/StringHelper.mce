@@ -1,0 +1,17 @@
+package com.example.util;
+
+import macer.lang.print;
+
+public class StringHelper {
+    public func upper(s: String) -> String {
+        return s;
+    }
+
+    public func join(a: String, b: String) -> String {
+        return a + b;
+    }
+
+    public func shout(s: String) -> String {
+        return self.join(self.upper(s), "!!!");
+    }
+}

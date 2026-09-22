@@ -1,0 +1,9 @@
+package macer.lang;
+
+// ????????????????
+public func print(value: Any) -> Void;
+public func len(s: Any) -> Int;
+public func str(v: Any) -> String;
+public func int(v: Any) -> Int;
+public func float(v: Any) -> Float;
+public func abs(v: Any) -> Float;

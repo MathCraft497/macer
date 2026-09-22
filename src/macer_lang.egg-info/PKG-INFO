@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: macer-lang
+Version: 0.1.0
+Summary: Macer OOP static-typed programming language
+Author: Macer Contributors
+License: MIT
+Requires-Python: >=3.8
+License-File: LICENSE
+Dynamic: license-file

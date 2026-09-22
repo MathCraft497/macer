@@ -1,0 +1,25 @@
+package com.example.app;
+
+import com.example.util.StringHelper;
+import com.example.util.MathHelper;
+import macer.lang.print;
+import macer.math.Math;
+
+public class App {
+    public func run() -> Void {
+        let sh: StringHelper = new StringHelper();
+        let mh: MathHelper = new MathHelper();
+        let math: Math = new Math();
+
+        print(sh.shout("hello"));
+        print("square(5) = " + str(mh.square(5)));
+        print("cube(3) = " + str(mh.cube(3)));
+        print("max(10, 7) = " + str(mh.max(10, 7)));
+        print("Math.PI = " + str(math.PI));
+    }
+}
+
+func main() -> Void {
+    let app: App = new App();
+    app.run();
+}

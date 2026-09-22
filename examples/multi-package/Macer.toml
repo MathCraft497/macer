@@ -1,0 +1,15 @@
+[package]
+name = "macer-example-multi"
+version = "0.1.0"
+edition = "2024"
+authors = ["Macer Contributors"]
+description = "演示 Macer 包系统的多包示例"
+
+[build]
+source_roots = ["src"]
+entry = "src/com/example/app/Main.mce"
+out_dir = "target"
+
+[dependencies]
+# 目前只演示 path 依赖；stdlib 由编译器内置提供
+# utils = { path = "../utils-lib" }

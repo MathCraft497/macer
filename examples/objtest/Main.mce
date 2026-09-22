@@ -1,0 +1,23 @@
+
+
+import macer.lang.Object;
+import macer.lang.print;
+
+public class MyObj {
+    public func calc.get.opr(text: String) -> String {
+        return "MY:" + text;
+    }
+}
+
+func main() -> Void {
+    // 1. Object 默认索引读（返回原字符串）
+    let o: Object = new Object();
+    print(o[hello]);              // 期望：hello
+    print(o[a:b]);                // 期望：a:b
+    print(o[lalal:yjfjfj-jf]);    // 期望：lalal:yjfjfj-jf
+
+    // 2. 子类覆盖 get.opr
+    let m: MyObj = new MyObj();
+    print(m[hello]);              // 期望：MY:hello
+    print(m[x:y]);                // 期望：MY:x:y
+}

@@ -1,0 +1,23 @@
+package macer.lang;
+
+public class Object {
+    // 索引读：obj[xxx] → get.opr("xxx")
+    public func calc.get.opr(text: String) -> String {
+        return text;
+    }
+
+    // 索引写：obj[xxx] = v → set.opr("xxx", v)
+    public func calc.set.opr(text: String, value: Any) -> Void {
+        // 默认什么都不做
+    }
+
+    // 字符串表示
+    public func toString() -> String {
+        return "Object";
+    }
+
+    // 相等（默认引用相等）
+    public func calc.opr==(other: Object) -> Bool {
+        return self == other;
+    }
+}

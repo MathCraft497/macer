@@ -1,0 +1,9 @@
+package macer.io;
+
+import macer.lang.print;
+
+public class Console {
+    public func println(s: String) -> Void {
+        print(s);
+    }
+}

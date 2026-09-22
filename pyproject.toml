@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "macer-lang"
+version = "0.1.0"
+description = "Macer OOP static-typed programming language"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Macer Contributors" }]
+dependencies = []
+
+[project.scripts]
+macer = "macer.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+macer = ["runtime/*.mce"]

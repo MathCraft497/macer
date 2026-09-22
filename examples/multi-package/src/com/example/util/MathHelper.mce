@@ -1,0 +1,19 @@
+package com.example.util;
+
+public class MathHelper {
+    public func square(x: Int) -> Int {
+        return x * x;
+    }
+
+    public func cube(x: Int) -> Int {
+        return x * x * x;
+    }
+
+    public func max(a: Int, b: Int) -> Int {
+        if a > b {
+            return a;
+        } else {
+            return b;
+        }
+    }
+}

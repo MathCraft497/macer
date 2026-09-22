@@ -1,0 +1,21 @@
+package macer.math;
+
+public class Math {
+    public PI: Float = 3.141592653589793;
+
+    public func max(a: Int, b: Int) -> Int {
+        if a > b {
+            return a;
+        } else {
+            return b;
+        }
+    }
+
+    public func min(a: Int, b: Int) -> Int {
+        if a < b {
+            return a;
+        } else {
+            return b;
+        }
+    }
+}
