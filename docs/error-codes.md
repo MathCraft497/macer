@@ -15,6 +15,7 @@ MCE<段位><序号>
 | `2xxx` | 语法 | 期望符号、赋值目标 |
 | `3xxx` | 类型 | 未定义、不匹配、重复 |
 | `4xxx` | 运行时 | 除零、空引用、越界 |
+| `5xxx` | 包系统 | 包加载、导入、目录 |
 
 ---
 
@@ -80,6 +81,18 @@ MCE<段位><序号>
 
 ---
 
+## 包系统（5xxx）
+
+| 码 | 含义 | 触发场景 |
+|----|------|----------|
+| `MCE5001` | 找不到包或符号 | `import a.b.C` 但找不到 C |
+| `MCE5002` | 包名与目录不匹配 | `package a.b;` 但文件不在 `a/b/` 下 |
+| `MCE5003` | 循环依赖 | A import B，B import A |
+| `MCE5004` | 重复定义的类 | 两个包下同名类冲突 |
+| `MCE5005` | 导入的符号不存在 | `from a.b import X` 但 X 不存在 |
+
+---
+
 ## 诊断格式
 
 标准格式：
@@ -104,13 +117,17 @@ M | <related source line>      ← 可选
 
 ## 错误示例
 
-### 词法错误
+### 词法错误（MCE1001）
+
+输入：
 
 ```macer
 func main() -> Void {
     let x: Int = 10 @ 20;
 }
 ```
+
+输出：
 
 ```
 Macer 编译器遇到错误：
@@ -123,13 +140,17 @@ error[MCE1001]: 无法识别的字符 '@'
 错误：1 个。编译终止。
 ```
 
-### 类型不匹配
+### 类型不匹配（MCE3002）
+
+输入：
 
 ```macer
 func main() -> Void {
     let x: Int = "hello";
 }
 ```
+
+输出：
 
 ```
 Macer 编译器遇到错误：
@@ -142,7 +163,9 @@ error[MCE3002]: 变量 'x' 初始化类型不匹配：String 无法赋给 Int
 错误：1 个。编译终止。
 ```
 
-### 重复定义（带 note）
+### 重复定义（MCE3003，带 note）
+
+输入：
 
 ```macer
 func main() -> Void {
@@ -150,6 +173,8 @@ func main() -> Void {
     let x: Int = 2;
 }
 ```
+
+输出：
 
 ```
 Macer 编译器遇到错误：
@@ -166,7 +191,46 @@ error[MCE3003]: 重复定义 'x'
 错误：1 个。编译终止。
 ```
 
-### 运行时错误
+### 包名目录不匹配（MCE5002）
+
+输入（文件位于 `examples/objtest/Main.mce`）：
+
+```macer
+package com.example.objtest;
+```
+
+输出：
+
+```
+Macer 编译器遇到错误：
+error[MCE5002]: 包名 'com.example.objtest' 与目录结构不匹配；
+文件应位于 .../com/example/objtest/ 下
+  --> examples/objtest/Main.mce
+
+错误：1 个。编译终止。
+```
+
+### 找不到包（MCE5001）
+
+输入：
+
+```macer
+import com.example.nothing.Foo;
+```
+
+输出：
+
+```
+Macer 编译器遇到错误：
+error[MCE5001]: 找不到导入的符号 'com.example.nothing.Foo'
+  --> main.mce
+
+错误：1 个。编译终止。
+```
+
+### 运行时错误（MCE4001）
+
+输入：
 
 ```macer
 func main() -> Void {
@@ -175,6 +239,8 @@ func main() -> Void {
     print(str(a / b));
 }
 ```
+
+输出：
 
 ```
 error[MCE4001]: 除以零

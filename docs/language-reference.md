@@ -11,8 +11,10 @@
 - [控制流](#控制流)
 - [函数](#函数)
 - [类与继承](#类与继承)
+- [根基类 Object](#根基类-object)
+- [包与导入](#包与导入)
+- [运算符重载](#运算符重载)
 - [内置库](#内置库)
-- [导入](#导入)
 
 ---
 
@@ -52,7 +54,7 @@
 class    func    var      let      if       else
 while    return  new      self     true     false
 null     import  from     as       public   private
-extends
+extends  calc    package
 ```
 
 ### 类型关键字
@@ -117,11 +119,10 @@ let c: Greeter = new LoudGreeter("x"); // OK：子类 → 父类
 var count: Int = 0;
 count = count + 1;
 
-// 不可变变量（重新赋值会报 MCE3008）
+// 不可变变量（重新赋值报 MCE3008）
 let name: String = "Macer";
-// name = "X";   // 错误
 
-// 无初始化（仅 Any 类型允许，否则报 MCE3002）
+// 无初始化（仅 Any 类型允许）
 let thing: Any;
 ```
 
@@ -140,10 +141,10 @@ let thing: Any;
 | 3 | `&&` | 左 | 逻辑与 |
 | 4 | `==` `!=` | 左 | 相等/不等 |
 | 5 | `<` `>` `<=` `>=` | 左 | 比较 |
-| 6 | `+` `-` | 左 | 加减 |
+| 6 | `+` `-` | 左 | 加减（`+` 支持字符串拼接） |
 | 7 | `*` `/` `%` | 左 | 乘除模 |
 | 8 | `-` `!` | 右（一元） | 取负 / 逻辑非 |
-| 9 | `.` `()` | 左 | 字段访问 / 调用 |
+| 9 | `.` `()` `[]` | 左 | 字段访问 / 调用 / 索引 |
 
 ### 类型规则
 
@@ -156,6 +157,10 @@ let thing: Any;
 | `&& \|\|` | 两侧 `Bool` | `Bool` |
 | `!` | `Bool` | `Bool` |
 | 一元 `-` | 数值 | 同侧 |
+
+### 运算符重载
+
+运算符可被类重载，见[运算符重载](#运算符重载)。
 
 ---
 
@@ -225,6 +230,9 @@ func add(a: Int, b: Int) -> Int {
 func ping() {
     print("pong");
 }
+
+// 声明式函数（无 body，用于内置库）
+public func print(value: Any) -> Void;
 ```
 
 - 顶层函数默认 `public`
@@ -273,14 +281,14 @@ public class Point {
 ### 方法
 
 - 语法：`[public|private] func name(params) -> Ret { ... }`
-- 方法内通过 `self` 访问字段和其他方法
-- `init` 是特殊方法：构造时调用
+- 方法内通过 `self` 访问字段和方法
+- `init` 是构造方法
 
 ### 创建实例
 
 ```macer
 let p: Point = new Point(3, 4);
-print(str(p.norm2()));  // 25
+print(str(p.norm2()));
 ```
 
 ### 继承
@@ -300,7 +308,6 @@ public class Point3D extends Point {
 }
 ```
 
-- 用 `extends` 指定父类
 - 子类方法可覆盖父类方法
 - 子类实例可赋给父类类型变量
 
@@ -310,51 +317,217 @@ let p: Point = new Point3D(1, 2, 3);  // OK
 
 ---
 
-## 内置库
+## 根基类 Object
 
-`../src/macer/runtime/basic.mce` 声明以下内置符号，用户程序无需 import 即可使用。
+**`macer.lang.Object`** 是所有类的**隐式基类**（类似 Java 的 `java.lang.Object`）。
 
-### 内置函数
+### 定义
 
-| 签名 | 说明 |
-|------|------|
-| `print(value: Any) -> Void` | 打印 |
-| `len(s: Any) -> Int` | 长度 |
-| `str(v: Any) -> String` | 转字符串 |
-| `int(v: Any) -> Int` | 转整数 |
-| `float(v: Any) -> Float` | 转浮点 |
-| `abs(v: Any) -> Float` | 绝对值 |
-
-### 内置类
+`stdlib/macer/lang/Object.mce`：
 
 ```macer
-public class Math {
-    public PI: Float = 3.141592653589793;
-    public func max(a: Int, b: Int) -> Int { ... }
-    public func min(a: Int, b: Int) -> Int { ... }
-}
+package macer.lang;
 
-public class StringUtils {
-    public func concat(a: String, b: String) -> String { ... }
-    public func isEmpty(s: String) -> Bool { ... }
+public class Object {
+    // 索引读：obj[xxx] -> get.opr("xxx")
+    public func calc.get.opr(text: String) -> String {
+        return text;
+    }
+
+    // 索引写：obj[xxx] = v -> set.opr("xxx", v)
+    public func calc.set.opr(text: String, value: Any) -> Void {
+    }
+
+    public func toString() -> String {
+        return "Object";
+    }
 }
 ```
+
+### 隐式继承
+
+所有类（不写 `extends`）**自动继承** `Object`：
+
+```macer
+public class App {          // 等价于 public class App extends Object
+    // ...
+}
+```
+
+### 所有类自动获得
+
+- `obj[xxx]` — 索引读，默认返回原字符串
+- `obj[xxx] = v` — 索引写
+- `obj.toString()` — 返回 `"Object"`（子类可覆盖）
 
 ---
 
-## 导入
+## 包与导入
 
-语法：
+### 包声明
 
 ```macer
-// 整模块导入
-import geometry;
-import math.utils;
-import math.utils as mu;
-
-// 具名导入
-from geometry import Point, Circle;
+package com.example.app;
 ```
 
-> **注意**：当前编译器对 `import` 仅做语法解析，未实现模块加载。
-> 多文件场景建议合并编译或扩展 `Compiler`。
+**要求**：文件必须位于 `com/example/app/` 目录下。
+
+### 导入
+
+```macer
+// 单类导入
+import com.example.util.StringHelper;
+
+// 包通配
+import com.example.io.*;
+
+// 别名
+import com.example.util.StringHelper as Helper;
+
+// 具名导入
+from com.example.util import StringHelper, MathHelper;
+
+// 内置函数也能导入
+import macer.lang.print;
+import macer.lang.str;
+```
+
+### 目录结构
+
+```
+project/
+├── src/
+│   └── com/example/app/
+│       └── Main.mce          ← package com.example.app;
+└── stdlib/                    ← 编译器提供的标准库
+```
+
+### 运行
+
+```
+python -m macer run --source-root src --source-root stdlib src/com/example/app/Main.mce
+```
+
+### 错误码
+
+| 码 | 含义 |
+|----|------|
+| `MCE5001` | 找不到包或符号 |
+| `MCE5002` | 包名与目录不匹配 |
+| `MCE5003` | 循环依赖 |
+| `MCE5004` | 重复定义的类 |
+| `MCE5005` | 导入的符号不存在 |
+
+---
+
+## 运算符重载
+
+通过 `calc.` 前缀声明运算符。
+
+### 支持的运算符
+
+| 声明 | 用户书写 | 说明 |
+|------|----------|------|
+| `calc.get.opr(text: String)` | `obj[xxx]` | 索引读，**文本不求值** |
+| `calc.set.opr(text, v)` | `obj[xxx] = v` | 索引写 |
+| `calc.opr+(other)` | `a + b` | 加法 |
+| `calc.opr-(other)` | `a - b` | 减法 |
+| `calc.opr*(other)` | `a * b` | 乘法 |
+| `calc.opr/(other)` | `a / b` | 除法 |
+| `calc.opr==(other)` | `a == b` | 相等 |
+| `calc.opr!=(other)` | `a != b` | 不等 |
+| `calc.opr<(other)` | `a < b` | 小于 |
+| `calc.opr>(other)` | `a > b` | 大于 |
+
+### 索引切片（`get.opr` / `set.opr`）
+
+**关键**：方括号里的内容**原样转字符串**，**不求值**。
+
+```macer
+public class Object {
+    public func calc.get.opr(text: String) -> String {
+        return text;
+    }
+}
+
+let o: Object = new Object();
+print(o[hello]);              // "hello"
+print(o[a:b]);                // "a:b"
+print(o[lalal:yjfjfj-jf]);    // "lalal:yjfjfj-jf"
+print(o[a[b[c]]]);            // "a[b[c]]"（支持嵌套）
+```
+
+**等价于**：
+
+```macer
+o.get.opr("hello")
+o.get.opr("a:b")
+o.get.opr("lalal:yjfjfj-jf")
+```
+
+### 索引写
+
+```macer
+o[key] = "value";      // 等价于 o.set.opr("key", "value")
+```
+
+### 二元运算符
+
+```macer
+public class Vec {
+    public x: Int;
+
+    public func init(x: Int) {
+        self.x = x;
+    }
+
+    public func calc.opr+(other: Vec) -> Vec {
+        return new Vec(self.x + other.x);
+    }
+
+    public func calc.opr==(other: Vec) -> Bool {
+        return self.x == other.x;
+    }
+}
+
+let a: Vec = new Vec(1);
+let b: Vec = new Vec(2);
+let c: Vec = a + b;         // 调 a.opr+(b)
+print(str(c.x));            // 3
+print(str(a == b));         // False
+```
+
+### 实现映射（Python 后端）
+
+| Macer | Python |
+|-------|--------|
+| `calc.get.opr` | `__getitem__` |
+| `calc.set.opr` | `__setitem__` |
+| `calc.opr+` | `__add__` |
+| `calc.opr-` | `__sub__` |
+| `calc.opr==` | `__eq__` |
+| `calc.opr!=` | `__ne__` |
+
+---
+
+## 内置库
+
+`stdlib/` 下声明。
+
+### `macer.lang`（语言核心）
+
+- `Object` — 根基类
+- `print(value: Any) -> Void`
+- `len(s: Any) -> Int`
+- `str(v: Any) -> String`
+- `int(v: Any) -> Int`
+- `float(v: Any) -> Float`
+- `abs(v: Any) -> Float`
+
+### `macer.math`
+
+- `Math` — 数学工具类（`PI`、`max`、`min`）
+
+### `macer.io`
+
+- `Console` — 控制台

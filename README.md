@@ -2,38 +2,56 @@
 
 > 一门面向对象、静态类型的编程语言
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
-
-Macer 是一门语法简洁、类型安全、错误信息友好的静态类型编程语言。
-编译器采用 Python 编写，可转译为 Python 直接运行。
+Macer 支持类、继承、包系统、运算符重载、静态类型检查，
+并带独立诊断系统（错误信息全部是 Macer 风格，绝不泄露 Python traceback）。
 
 ## 特性
 
 - **面向对象**：类、字段、方法、继承（`extends`）、`self`
-- **静态类型**：编译期类型检查，支持子类型与数值提升
-- **独立诊断**：类似 Rust/Elm 的错误提示，带错误码与源码高亮
-- **零依赖**：仅需 Python 3.8+，无需任何第三方包
+- **静态类型**：编译期类型检查，FQN 归一化
+- **根基类**：`macer.lang.Object`，所有类隐式继承
+- **包系统**：`package` / `import`，Java 风格目录匹配
+- **运算符重载**：`calc.opr+` / `calc.opr==` / `calc.get.opr` / `calc.set.opr`
+- **索引切片**：`obj[原始文本]`，方括号内容不求值，原样转字符串
+- **独立诊断**：`MCE` 错误码 + 源码高亮
+- **运行时隔离**：无 Python traceback 泄露
+- **零依赖**：只用 Python 标准库
 
 ## 快速开始
 
-```bash
+```
 git clone <repo> macer
 cd macer
-python macer.py run examples/hello.mce
+python -m macer run --source-root examples/multi-package/src --source-root stdlib examples/multi-package/src/com/example/app/Main.mce
 ```
 
 输出：
 
 ```
-Hello, Macer!
-HELLO, World!!!
-sum = 30
+hello!!!
+square(5) = 25
+cube(3) = 27
+max(10, 7) = 10
+Math.PI = 3.141592653589793
 ```
 
-## 示例代码
+## 语言示例
+
+### Hello World
 
 ```macer
+func main() -> Void {
+    print("Hello, Macer!");
+}
+```
+
+### 类与继承
+
+```macer
+package com.example.app;
+
+import macer.lang.print;
+
 public class Greeter {
     public name: String;
 
@@ -52,32 +70,43 @@ func main() -> Void {
 }
 ```
 
-## 文档
+### 索引切片
 
-- [文档首页](docs/index.md)
-- [快速开始](docs/getting-started.md)
-- [语言参考](docs/language-reference.md)
-- [编译器架构](docs/compiler-architecture.md)
-- [错误码表](docs/error-codes.md)
-- [CLI 使用](docs/cli.md)
-- [常见问题](docs/faq.md)
-- [贡献指南](docs/contributing.md)
+```macer
+package com.example.objtest;
+
+import macer.lang.Object;
+import macer.lang.print;
+
+public class MyObj {
+    public func calc.get.opr(text: String) -> String {
+        return "MY:" + text;
+    }
+}
+
+func main() -> Void {
+    let o: MyObj = new MyObj();
+    print(o[hello]);          // MY:hello
+}
+```
 
 ## 项目结构
 
 ```
 macer/
-├── macer.py          # CLI 入口
-├── src/              # 编译器源码
-├── libs/             # 运行时 + 内置库
-├── examples/         # 示例程序
-└── docs/             # 文档
+├── src/macer/        编译器源码
+├── stdlib/           标准库（.mce）
+├── examples/         示例
+├── docs/             文档
+└── pyproject.toml    打包配置
 ```
 
-## 环境要求
+## 文档
 
-- Python 3.8+
+- [语言参考](docs/language-reference.md)
+- [错误码表](docs/error-codes.md)
+- [CLI 使用](docs/cli.md)
 
 ## 许可证
 
-本项目采用 [MIT 许可证](LICENSE)。
+MIT
