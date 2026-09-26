@@ -150,6 +150,62 @@ class BytecodeCodeGen:
             self.writer.emit(Op.STORE_LOCAL, slot)
             return
 
+        if isinstance(s, ast.IfStmt):
+            self._gen_expr(s.cond)
+
+            # JUMP_IF_FALSE → else
+            jf_pos = self.writer.code_offset
+            self.writer.emit(Op.JUMP_IF_FALSE, 0)  # 占位
+
+            for st in s.then_body:
+                self._gen_stmt(st)
+
+            if s.else_body:
+                # then 结束跳 end
+                jend_pos = self.writer.code_offset
+                self.writer.emit(Op.JUMP, 0)  # 占位
+
+                # 回填 JUMP_IF_FALSE → else 起点
+                else_start = self.writer.code_offset
+                self._patch_s2(jf_pos, else_start - (jf_pos + 3))
+
+                for st in s.else_body:
+                    self._gen_stmt(st)
+
+                # 回填 JUMP → end
+                end = self.writer.code_offset
+                self._patch_s2(jend_pos, end - (jend_pos + 3))
+            else:
+                # 无 else：JUMP_IF_FALSE 跳到 then 结束
+                end = self.writer.code_offset
+                self._patch_s2(jf_pos, end - (jf_pos + 3))
+            return
+
+        if isinstance(s, ast.WhileStmt):
+            loop_start = self.writer.code_offset
+            self._gen_expr(s.cond)
+
+            jf_pos = self.writer.code_offset
+            self.writer.emit(Op.JUMP_IF_FALSE, 0)  # 占位
+
+            for st in s.body:
+                self._gen_stmt(st)
+
+            # 回跳
+            jump_pos = self.writer.code_offset
+            back = loop_start - (jump_pos + 3)
+            self.writer.emit(Op.JUMP, back)
+
+            # 回填 JUMP_IF_FALSE → 当前位置
+            end = self.writer.code_offset
+            self._patch_s2(jf_pos, end - (jf_pos + 3))
+            return
+
+        if isinstance(s, ast.Block):
+            for st in s.body:
+                self._gen_stmt(st)
+            return
+
         raise BytecodeCodeGenError(
             f"阶段 3.2 暂不支持的语句：{type(s).__name__}")
 
@@ -159,6 +215,11 @@ class BytecodeCodeGen:
             if e.callee.name == "print":
                 return True
         return False
+
+    def _patch_s2(self, pos, value):
+        """回填 s2 操作数（pos 是 jump 指令起始）"""
+        import struct
+        struct.pack_into(">h", self.writer.code, pos + 1, value)
 
     # ============================================================
     # 表达式

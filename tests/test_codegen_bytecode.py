@@ -135,6 +135,82 @@ func main() -> Void {
     assert out == "3\n", f"输出: {out!r}"
     print("OK  test_let_chain")
 
+def test_if_then():
+    out = _compile_and_run("""
+func main() -> Void {
+    let a: Int = 5;
+    if a > 3 {
+        print(100);
+    }
+}
+""")
+    assert out == "100\n", f"输出: {out!r}"
+    print("OK  test_if_then")
+
+
+def test_if_else():
+    out = _compile_and_run("""
+func main() -> Void {
+    let a: Int = 2;
+    if a > 3 {
+        print(100);
+    } else {
+        print(200);
+    }
+}
+""")
+    assert out == "200\n", f"输出: {out!r}"
+    print("OK  test_if_else")
+
+
+def test_if_else_chain():
+    out = _compile_and_run("""
+func main() -> Void {
+    let a: Int = 5;
+    if a > 10 {
+        print(1);
+    } else {
+        if a > 3 {
+            print(2);
+        } else {
+            print(3);
+        }
+    }
+}
+""")
+    assert out == "2\n", f"输出: {out!r}"
+    print("OK  test_if_else_chain")
+
+
+def test_while():
+    out = _compile_and_run("""
+func main() -> Void {
+    var i: Int = 0;
+    while i < 3 {
+        print(i);
+        i = i + 1;
+    }
+}
+""")
+    assert out == "0\n1\n2\n", f"输出: {out!r}"
+    print("OK  test_while")
+
+
+def test_while_sum():
+    out = _compile_and_run("""
+func main() -> Void {
+    var sum: Int = 0;
+    var i: Int = 1;
+    while i <= 5 {
+        sum = sum + i;
+        i = i + 1;
+    }
+    print(sum);
+}
+""")
+    assert out == "15\n", f"输出: {out!r}"
+    print("OK  test_while_sum")
+
 
 if __name__ == "__main__":
     tests = [
@@ -148,6 +224,11 @@ if __name__ == "__main__":
         test_let,
         test_var_assign,
         test_let_chain,
+        test_if_then,
+        test_if_else,
+        test_if_else_chain,
+        test_while,
+        test_while_sum,
     ]
     failed = 0
     for t in tests:
