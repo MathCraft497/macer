@@ -141,8 +141,17 @@ class BytecodeCodeGen:
                 self.writer.emit(Op.RETURN)
             return
 
+        if isinstance(s, ast.VarDecl):
+            if s.init is not None:
+                self._gen_expr(s.init)
+            else:
+                self.writer.emit(Op.LOAD_NULL)
+            slot = self._alloc_local(s.name)
+            self.writer.emit(Op.STORE_LOCAL, slot)
+            return
+
         raise BytecodeCodeGenError(
-            f"阶段 3.1 暂不支持的语句：{type(s).__name__}")
+            f"阶段 3.2 暂不支持的语句：{type(s).__name__}")
 
     def _is_void_expr(self, e):
         """判断表达式是否返回 Void（如 print(...)）"""
@@ -182,6 +191,28 @@ class BytecodeCodeGen:
         if isinstance(e, ast.CharLit):
             idx = self.writer.cp.add_char(e.value)
             self.writer.emit(Op.LOAD_CONST, idx)
+            return
+
+        # ---------- 标识符 ----------
+        if isinstance(e, ast.Ident):
+            slot = self.local_slots.get(e.name)
+            if slot is None:
+                raise BytecodeCodeGenError(f"未定义变量: {e.name}")
+            self.writer.emit(Op.LOAD_LOCAL, slot)
+            return
+
+        # ---------- 赋值 ----------
+        if isinstance(e, ast.Assign):
+            if not isinstance(e.target, ast.Ident):
+                raise BytecodeCodeGenError(
+                    "阶段 3.2 只支持变量赋值")
+            self._gen_expr(e.value)
+            self.writer.emit(Op.DUP)
+            slot = self.local_slots.get(e.target.name)
+            if slot is None:
+                raise BytecodeCodeGenError(
+                    f"未定义变量: {e.target.name}")
+            self.writer.emit(Op.STORE_LOCAL, slot)
             return
 
         # ---------- 二元运算 ----------

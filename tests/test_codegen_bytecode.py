@@ -99,6 +99,42 @@ func main() -> Void {
     assert out == "-5\nfalse\n", f"输出: {out!r}"
     print("OK  test_unary")
 
+def test_let():
+    out = _compile_and_run("""
+func main() -> Void {
+    let a: Int = 1;
+    let b: Int = 2;
+    print(a + b);
+}
+""")
+    assert out == "3\n", f"输出: {out!r}"
+    print("OK  test_let")
+
+
+def test_var_assign():
+    out = _compile_and_run("""
+func main() -> Void {
+    var c: Int = 10;
+    c = c + 5;
+    print(c);
+}
+""")
+    assert out == "15\n", f"输出: {out!r}"
+    print("OK  test_var_assign")
+
+
+def test_let_chain():
+    out = _compile_and_run("""
+func main() -> Void {
+    let a: Int = 1;
+    let b: Int = a + 1;
+    let c: Int = a + b;
+    print(c);
+}
+""")
+    assert out == "3\n", f"输出: {out!r}"
+    print("OK  test_let_chain")
+
 
 if __name__ == "__main__":
     tests = [
@@ -109,6 +145,9 @@ if __name__ == "__main__":
         test_str_builtin,
         test_compare,
         test_unary,
+        test_let,
+        test_var_assign,
+        test_let_chain,
     ]
     failed = 0
     for t in tests:
