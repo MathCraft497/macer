@@ -65,6 +65,7 @@ class Op(IntEnum):
 
     # 内置
     PRINT = 0x80
+    TO_STRING = 0x81  # ← 新增
 
 
 @dataclass(frozen=True)
@@ -128,6 +129,7 @@ OP_INFO = {
     Op.SWAP:           OpInfo("SWAP", (), 2, 2),
 
     Op.PRINT:          OpInfo("PRINT", (), 1, 0),
+    Op.TO_STRING:      OpInfo("TO_STRING", (), 1, 1),  # ← 新增
 }
 
 

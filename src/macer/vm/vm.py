@@ -216,6 +216,10 @@ class VM:
             v = stack.pop("PRINT")
             Builtins.print(v)
 
+        elif op == Op.TO_STRING:
+            v = stack.pop("TO_STRING")
+            stack.push(Builtins.to_display(v))
+
         # ---------- 返回 ----------
         elif op == Op.RETURN:
             frame.return_value = stack.pop("RETURN")
