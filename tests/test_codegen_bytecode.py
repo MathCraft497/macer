@@ -291,6 +291,26 @@ func main() -> Void {
     assert out == "7\n", f"输出: {out!r}"
     print("OK  test_init")
 
+def test_method_overload():
+    out = _compile_and_run("""
+class Calc {
+    func add(a: Int) -> Int {
+        return a;
+    }
+
+    func add(a: Int, b: Int) -> Int {
+        return a + b;
+    }
+}
+
+func main() -> Void {
+    let c: Calc = new Calc();
+    print(c.add(5));
+    print(c.add(3, 4));
+}
+""")
+    assert out == "5\n7\n", f"输出: {out!r}"
+    print("OK  test_method_overload")
 
 if __name__ == "__main__":
     tests = [
@@ -313,6 +333,7 @@ if __name__ == "__main__":
         test_field_assign,
         test_method_call,
         test_init,
+        test_method_overload,
     ]
     failed = 0
     for t in tests:

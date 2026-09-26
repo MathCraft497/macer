@@ -5,8 +5,13 @@ from .diagnostics import (
     DiagnosticBag, MacerCompileError, Diagnostic, Span, Severity, ErrCode,
 )
 
-
-PRIMITIVES = {"Int", "Float", "String", "Bool", "Void", "Any"}
+CHAR_METHODS = {
+    "toInt": ([], "Int"),
+    "toString": ([], "String"),
+    "toUpper": ([], "Char"),
+    "toLower": ([], "Char"),
+}
+PRIMITIVES = {"Int", "Float", "Bool", "Void", "Any", "Char"}
 NUMERIC = {"Int", "Float"}
 PSEUDO_TYPES = PRIMITIVES | {"func"}
 
@@ -58,13 +63,20 @@ class ClassInfo:
         self.parent_simple = decl.parent
         self.parent_fqn = None
         self.fields = {f.name: f for f in decl.fields}
-        self.methods = {m.name: m for m in decl.methods}
+        # name → [FuncDecl, ...]（多个同名方法）
+        self.methods = {}
+        for m in decl.methods:
+            self.methods.setdefault(m.name, []).append(m)
 
         # 运算符重载
         self.operators = {}
+        # overload 声明：方法名 → [FuncDecl]
+        self.overloads = {}
         for m in decl.methods:
             if getattr(m, "operator", None):
                 self.operators[m.operator] = m
+            if getattr(m, "overload", False):
+                self.overloads.setdefault(m.name, []).append(m)
 
     def find_field(self, name, classes):
         if name in self.fields:
@@ -73,11 +85,22 @@ class ClassInfo:
             return classes[self.parent_fqn].find_field(name, classes)
         return None
 
-    def find_method(self, name, classes):
-        if name in self.methods:
-            return self.methods[name]
+    def find_method(self, name, classes, n_args=None):
+        """找方法——按名字 + 可选参数个数"""
+        candidates = self.methods.get(name, [])
+        if n_args is None:
+            # 不指定参数个数——返回第一个（兼容旧调用）
+            if candidates:
+                return candidates[0]
+        else:
+            # 精确匹配参数个数
+            for m in candidates:
+                if len(m.params) == n_args:
+                    return m
+        # 父类
         if self.parent_fqn and self.parent_fqn in classes:
-            return classes[self.parent_fqn].find_method(name, classes)
+            return classes[self.parent_fqn].find_method(
+                name, classes, n_args)
         return None
 
     def find_operator(self, op_key, classes):
@@ -282,7 +305,10 @@ class TypeChecker:
         for unit in self.units:
             self._register_unit_symbols(unit)
 
+        STRING_FQN = "macer.lang.String"
         for name, (params, ret) in self.basic_lib.items():
+            if name == "str" and STRING_FQN in self.classes:
+                ret = ast.TypeNode(STRING_FQN)
             sym = Symbol(name, ast.TypeNode("func"), False, "func")
             sym.func_sig = (params, ret)
             self.global_scope.symbols[name] = sym
@@ -292,6 +318,21 @@ class TypeChecker:
 
     def _register_unit_symbols(self, unit):
         table = {}
+
+        # 0. ★ 自动注入 macer.lang.* 的所有符号
+        LANG_PREFIX = "macer.lang."
+        for fqn, ci in self.classes.items():
+            if fqn.startswith(LANG_PREFIX):
+                rest = fqn[len(LANG_PREFIX):]
+                if "." not in rest:
+                    table[ci.name] = ci
+        for fqn, fn in self.functions.items():
+            if fqn.startswith(LANG_PREFIX):
+                rest = fqn[len(LANG_PREFIX):]
+                if "." not in rest:
+                    table[fn.name] = fn
+
+        # 1. 本包内的类与函数
         for d in unit.program.declarations:
             if isinstance(d, ast.ClassDecl):
                 fqn = f"{unit.package}.{d.name}" if unit.package else d.name
@@ -367,6 +408,16 @@ class TypeChecker:
                 self._check_func(d, owner=None)
         self.current_unit = prev
 
+    def _check_char_method(self, name, args, scope, node):
+        if name not in CHAR_METHODS:
+            self._err(ErrCode.TYPE_NO_METHOD,
+                      f"Char 没有方法 '{name}'", node)
+        param_types, ret = CHAR_METHODS[name]
+        if len(param_types) != len(args):
+            self._err(ErrCode.TYPE_ARG_COUNT,
+                      f"Char.{name} 需要 {len(param_types)} 个参数", node)
+        return ast.TypeNode(ret)
+
     def _check_class(self, cls):
         prev = self.current_class
         self.current_class = cls
@@ -426,12 +477,18 @@ class TypeChecker:
         """校验运算符方法的签名"""
         op = fn.operator
         if op in ("get.opr", "set.opr"):
-            # get.opr(text: String) ; set.opr(text: String, value: T)
             if len(fn.params) < 1:
                 self._err(ErrCode.TYPE_ARG_COUNT,
                           f"'{op}' 至少需要 1 个参数（索引字符串）", fn)
             p0 = self._normalize_type(fn.params[0].type_node)
-            if p0.name not in ("String", "Any"):
+            # 接受 Any / String / macer.lang.String
+            is_string = (
+                    p0.name in ("Any", "String") or
+                    p0.name == "macer.lang.String" or
+                    (p0.name in self.classes and
+                     self.classes[p0.name].name == "String")
+            )
+            if not is_string:
                 self._err(ErrCode.TYPE_MISMATCH,
                           f"'{op}' 的第一个参数必须是 String", fn)
             if op == "set.opr" and len(fn.params) != 2:
@@ -441,7 +498,6 @@ class TypeChecker:
             if len(fn.params) != 1:
                 self._err(ErrCode.TYPE_ARG_COUNT,
                           f"运算符 '{op}' 需要 1 个参数", fn)
-        # 允许自定义
 
     def _check_block(self, stmts, scope):
         for s in stmts:
@@ -511,11 +567,33 @@ class TypeChecker:
         if isinstance(e, ast.FloatLit):
             return ast.TypeNode("Float")
         if isinstance(e, ast.StringLit):
+            # 返回 macer.lang.String 类的 FQN
+            ci = self._resolve_class("String", self.current_unit)
+            if ci is not None:
+                return ast.TypeNode(ci.fqn)
             return ast.TypeNode("String")
         if isinstance(e, ast.BoolLit):
             return ast.TypeNode("Bool")
         if isinstance(e, ast.NullLit):
             return ast.TypeNode("Any")
+
+        if isinstance(e, ast.CharLit):
+            return ast.TypeNode("Char")
+
+        if isinstance(e, ast.ArrayLit):
+            if not e.elements:
+                return ast.TypeNode("Any", is_array=True, array_dims=1)
+            elem_t = self.infer(e.elements[0], scope)
+            for el in e.elements[1:]:
+                et = self.infer(el, scope)
+                if not (self.is_assignable(elem_t, et) or
+                        self.is_assignable(et, elem_t)):
+                    self._err(ErrCode.TYPE_MISMATCH,
+                              f"数组元素类型不一致：{elem_t} vs {et}", e)
+                if et.name == "Float" and elem_t.name == "Int":
+                    elem_t = ast.TypeNode("Float")
+            return ast.TypeNode(elem_t.name, elem_t.generics,
+                                is_array=True, array_dims=1)
 
         if isinstance(e, ast.Ident):
             sym = scope.lookup(e.name)
@@ -547,7 +625,7 @@ class TypeChecker:
             if ci is None:
                 self._err(ErrCode.TYPE_NOT_CLASS,
                           f"未知的类 '{e.class_name}'", e)
-            ctor = ci.find_method("init", self.classes)
+            ctor = ci.find_method("init", self.classes, n_args=len(e.args))
             expected = ctor.params if ctor else []
             if len(expected) != len(e.args):
                 self._err(ErrCode.TYPE_ARG_COUNT,
@@ -683,15 +761,16 @@ class TypeChecker:
         if isinstance(e, ast.IndexExpr):
             obj_t = self.infer(e.obj, scope)
 
-            # 情况 1：数组索引
             if obj_t.is_array:
+                # 数组：用 expr 索引
+                e.is_array_index = True
                 idx_t = self.infer(e.index, scope)
                 if idx_t.name not in ("Int", "Any"):
                     self._err(ErrCode.TYPE_MISMATCH,
                               f"数组索引必须是 Int，实际 {idx_t}", e)
-                return ast.TypeNode(obj_t.name, obj_t.generics)  # 元素类型
+                return ast.TypeNode(obj_t.name, obj_t.generics)
 
-            # 情况 2：obj[原始文本] → get.opr
+            # 类：用 raw_text 走 get.opr
             ci = self.classes.get(obj_t.name)
             if ci is None:
                 self._err(ErrCode.TYPE_NOT_CLASS,
@@ -750,10 +829,9 @@ class TypeChecker:
                                       "pop 不需要参数", e)
                         return elem_t
 
-                # String 特殊处理（阶段 3）
-                if obj_t.name == "String":
-                    e.is_string_method = True
-                    return self._check_string_method(
+
+                if obj_t.name == "Char":
+                    return self._check_char_method(
                         e.callee.field, e.args, scope, e)
 
                 # 类方法
@@ -762,8 +840,19 @@ class TypeChecker:
                     self._err(ErrCode.TYPE_NOT_CLASS,
                               f"'{obj_t}' 不是类，无法调用方法 "
                               f"'{e.callee.field}'", e.callee)
-                m = ci.find_method(e.callee.field, self.classes)
+                m = ci.find_method(e.callee.field, self.classes,
+                                   n_args=len(e.args))
                 if m is None:
+                    # 报更具体的错
+                    avail = ci.methods.get(e.callee.field, [])
+                    if avail:
+                        counts = [len(a.params) for a in avail]
+                        self._err(
+                            ErrCode.TYPE_ARG_COUNT,
+                            f"方法 '{e.callee.field}' 没有接受 "
+                            f"{len(e.args)} 个参数的重载"
+                            f"（可用：{counts}）",
+                            e.callee)
                     self._err(ErrCode.TYPE_NO_METHOD,
                               f"类 '{obj_t}' 没有方法 "
                               f"'{e.callee.field}'", e.callee)
@@ -796,25 +885,6 @@ class TypeChecker:
                 self._err(ErrCode.TYPE_UNDEFINED,
                           f"未定义的函数 '{name}'", e.callee)
 
-            if isinstance(e, ast.CharLit):
-                return ast.TypeNode("Char")
-
-            if isinstance(e, ast.ArrayLit):
-                if not e.elements:
-                    # 空数组 → 类型待定，用 Any[]
-                    return ast.TypeNode("Any", is_array=True, array_dims=1)
-                elem_t = self.infer(e.elements[0], scope)
-                for el in e.elements[1:]:
-                    et = self.infer(el, scope)
-                    if not self.is_assignable(elem_t, et) and \
-                            not self.is_assignable(et, elem_t):
-                        self._err(ErrCode.TYPE_MISMATCH,
-                                  f"数组元素类型不一致：{elem_t} vs {et}", e)
-                    # 提升
-                    if et.name == "Float" and elem_t.name == "Int":
-                        elem_t = ast.TypeNode("Float")
-                return ast.TypeNode(elem_t.name, elem_t.generics,
-                                    is_array=True, array_dims=1)
             self._err(ErrCode.TYPE_NOT_CALLABLE, "不支持的调用目标", e.callee)
 
         self._err(ErrCode.TYPE_MISMATCH,

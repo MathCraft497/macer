@@ -409,7 +409,7 @@ class BytecodeCodeGen:
                 self._gen_expr(e.callee.obj)  # this
                 for a in e.args:
                     self._gen_expr(a)
-                method_ref = self._resolve_method_ref(e.callee)
+                method_ref = self._resolve_method_ref(e.callee.field, len(e.args))
                 self.writer.emit(Op.INVOKE, method_ref)
                 return
             self._gen_call(e)
@@ -418,17 +418,21 @@ class BytecodeCodeGen:
         raise BytecodeCodeGenError(
             f"阶段 3.1 暂不支持的表达式：{type(e).__name__}")
 
-    def _resolve_method_ref(self, field_access):
-        # 简化：假设 obj 是 self 或 new 的类——找任意类里的同名方法
-        method_name = field_access.field
+    def _resolve_method_ref(self, method_name, n_args):
+        """按名字 + 参数个数找方法"""
+        from .bytecode.descriptor import parse_descriptor
         for fqn, cls_idx in self.class_map.items():
             cls = self.writer.ct.classes[cls_idx]
             for m in cls.methods:
                 name = self.writer.cp.resolve_string(m.name_idx)
-                if name == method_name:
-                    desc = self.writer.cp.resolve_string(m.descriptor_idx)
+                if name != method_name:
+                    continue
+                desc = self.writer.cp.resolve_string(m.descriptor_idx)
+                d = parse_descriptor(desc)
+                if len(d.params) == n_args:
                     return self.writer.cp.add_method_ref(fqn, method_name, desc)
-        raise BytecodeCodeGenError(f"未知方法: {method_name}")
+        raise BytecodeCodeGenError(
+            f"未知方法: {method_name}/{n_args}")
 
     def _resolve_field_ref(self, field_name):
         # 简化：假设 obj 是 self 或 new 的类
