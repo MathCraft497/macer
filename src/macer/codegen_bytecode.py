@@ -34,11 +34,13 @@ class BytecodeCodeGen:
         self.local_slots = {}
         self.next_slot = 0
 
+        self.current_unit = None
+
     # ============================================================
     # 入口
     # ============================================================
     def generate(self) -> BytecodeWriter:
-        # 1. 收集所有函数（阶段 3.1 只处理顶层函数）
+        # 1. 收集所有顶层函数
         top_funcs = []
         for unit in self.units:
             pkg = unit.package
@@ -47,12 +49,23 @@ class BytecodeCodeGen:
                     fqn = f"{pkg}.{d.name}" if pkg else d.name
                     top_funcs.append((fqn, d))
 
-        # 2. 先占位（函数表按顺序加，code_offset 后填）
-        # 简化：直接生成，边生成边加函数表
+        # 2. 先占位（code_offset=0）
         for fqn, fn in top_funcs:
-            self._gen_function(fqn, fn)
+            name_idx = self.writer.cp.add_string(fn.name)
+            desc = self._make_descriptor(fn)
+            desc_idx = self.writer.cp.add_string(desc)
+            func_idx = self.writer.ct.add_function(
+                name_idx, desc_idx,
+                code_offset=0, code_length=0, local_count=0,
+            )
+            self.func_map[fqn] = func_idx  # ★ 关键！
 
-        # 3. 设置 entry_main
+        # 3. 逐个生成函数体，回填
+        for fqn, fn in top_funcs:
+            func_idx = self.func_map[fqn]
+            self._gen_function(fqn, fn, func_idx)
+
+        # 4. entry_main
         if "main" in self.func_map:
             self.writer.entry_main = self.func_map["main"]
         elif top_funcs:
@@ -63,7 +76,8 @@ class BytecodeCodeGen:
     # ============================================================
     # 函数生成
     # ============================================================
-    def _gen_function(self, fqn, fn):
+    def _gen_function(self, fqn, fn, func_idx):
+        """生成函数体，回填函数表的 code_offset"""
         self._reset_locals(fn)
 
         code_start = self.writer.code_offset
@@ -77,18 +91,11 @@ class BytecodeCodeGen:
 
         code_end = self.writer.code_offset
 
-        # 加函数表项
-        name_idx = self.writer.cp.add_string(fn.name)
-        desc = self._make_descriptor(fn)
-        desc_idx = self.writer.cp.add_string(desc)
-
-        func_idx = self.writer.ct.add_function(
-            name_idx, desc_idx,
-            code_offset=code_start,
-            code_length=code_end - code_start,
-            local_count=self.next_slot,
-        )
-        self.func_map[fqn] = func_idx
+        # 回填函数表
+        fd = self.writer.ct.functions[func_idx]
+        fd.code_offset = code_start
+        fd.code_length = code_end - code_start
+        fd.local_count = self.next_slot
 
     def _reset_locals(self, fn):
         self.local_slots = {}
@@ -343,6 +350,31 @@ class BytecodeCodeGen:
                     "阶段 3.1 str 只接受 1 个参数")
             self._gen_expr(e.args[0])
             self.writer.emit(Op.TO_STRING)
+            return
+
+        # ---------- 用户函数 ----------
+        # 拼 FQN 查找
+        unit = self.current_unit
+        fqn = None
+        if unit and unit.package:
+            candidate = f"{unit.package}.{name}"
+            if candidate in self.func_map:
+                fqn = candidate
+        if fqn is None and name in self.func_map:
+            fqn = name
+        if fqn is None:
+            # 遍历所有 key，找简单名匹配
+            for k in self.func_map:
+                if k == name or k.endswith("." + name):
+                    fqn = k
+                    break
+
+        if fqn is not None:
+            # 压参数
+            for a in e.args:
+                self._gen_expr(a)
+            func_idx = self.func_map[fqn]
+            self.writer.emit(Op.INVOKE_STATIC, func_idx)
             return
 
         raise BytecodeCodeGenError(

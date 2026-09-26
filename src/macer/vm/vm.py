@@ -1,7 +1,8 @@
-"""Macer 虚拟机 —— 栈式执行引擎（阶段 2 最小版）"""
+"""Macer 虚拟机 —— 栈式执行引擎（阶段 3.4.1）"""
 import struct
 
 from ..bytecode import Op, OP_INFO, ConstTag
+from ..bytecode.descriptor import parse_descriptor
 from .error import (
     VMError, VMTypeError, VMDivisionByZero, VMBadOpcode, VMIndexError,
 )
@@ -26,19 +27,20 @@ class VM:
     # 入口
     # ============================================================
     def run(self, method_idx=None, args=()):
-        """执行 main 或指定方法"""
+        """执行 main 或指定函数"""
         if method_idx is None:
             method_idx = self.entry_main
 
-        # 找方法
-        method, code_start, code_len, local_count = self._resolve_entry(method_idx)
-        if method is None:
-            raise VMError("MCE5006", "找不到 main 方法")
+        # 解析入口
+        entry = self._resolve_entry(method_idx)
+        if entry is None:
+            raise VMError("MCE5006", "找不到 main 函数")
 
-        frame = Frame(code_start, local_count, this=None, method_ref=method)
+        code_start, code_len, local_count = entry
+
+        frame = Frame(code_start, local_count)
         frame.code_end = code_start + code_len
 
-        # 参数放局部变量
         for i, a in enumerate(args):
             if i < local_count:
                 frame.locals[i] = a
@@ -48,27 +50,29 @@ class VM:
         return frame.return_value
 
     def _resolve_entry(self, method_idx):
-        """找 main 方法（第一个类里的第 method_idx 个方法）"""
-        # 简单策略：找所有类里的第一个方法（或 main）
+        """返回 (code_offset, code_length, local_count)"""
+        # 优先顶层函数
+        if self.ct.functions:
+            # 找 main
+            for fd in self.ct.functions:
+                name = self.cp.resolve_string(fd.name_idx)
+                if name == "main":
+                    return fd.code_offset, fd.code_length, fd.local_count
+            # 无 main，用第一个
+            fd = self.ct.functions[0]
+            return fd.code_offset, fd.code_length, fd.local_count
+
+        # 没函数，看类方法
         for cls in self.ct.classes:
-            for i, m in enumerate(cls.methods):
+            for m in cls.methods:
                 name = self.cp.resolve_string(m.name_idx)
                 if name == "main":
-                    return m, m.code_offset, m.code_length, m.local_count
-        # 没有 main，用第一个方法
-        for cls in self.ct.classes:
+                    return m.code_offset, m.code_length, m.local_count
             if cls.methods:
                 m = cls.methods[0]
-                return m, m.code_offset, m.code_length, m.local_count
-        # 顶层函数
-        for fn in self.ct.functions:
-            name = self.cp.resolve_string(fn.name_idx)
-            if name == "main":
-                return fn, fn.code_offset, fn.code_length, fn.local_count
-        if self.ct.functions:
-            fn = self.ct.functions[0]
-            return fn, fn.code_offset, fn.code_length, fn.local_count
-        return None, 0, 0, 0
+                return m.code_offset, m.code_length, m.local_count
+
+        return None
 
     # ============================================================
     # 主循环
@@ -80,6 +84,8 @@ class VM:
             # 到达代码尾 → 返回
             if frame.code_end is not None and frame.pc >= frame.code_end:
                 self.frames.pop()
+                if self.frames:
+                    self.frames[-1].stack.push(None)
                 continue
 
             if frame.pc >= len(self.code):
@@ -134,34 +140,27 @@ class VM:
 
         # ---------- 算术 ----------
         elif op == Op.ADD:
-            b = stack.pop("ADD")
-            a = stack.pop("ADD")
-            stack.push(self._op_add(a, b))
-
+            b = stack.pop("ADD"); a = stack.pop("ADD")
+            stack.push(a + b)
         elif op == Op.SUB:
-            b = stack.pop("SUB")
-            a = stack.pop("SUB")
-            stack.push(self._op_sub(a, b))
-
+            b = stack.pop("SUB"); a = stack.pop("SUB")
+            stack.push(a - b)
         elif op == Op.MUL:
-            b = stack.pop("MUL")
-            a = stack.pop("MUL")
-            stack.push(self._op_mul(a, b))
-
+            b = stack.pop("MUL"); a = stack.pop("MUL")
+            stack.push(a * b)
         elif op == Op.DIV:
-            b = stack.pop("DIV")
-            a = stack.pop("DIV")
-            stack.push(self._op_div(a, b))
-
+            b = stack.pop("DIV"); a = stack.pop("DIV")
+            if b == 0:
+                raise VMDivisionByZero()
+            stack.push(a / b)
         elif op == Op.MOD:
-            b = stack.pop("MOD")
-            a = stack.pop("MOD")
-            stack.push(self._op_mod(a, b))
-
+            b = stack.pop("MOD"); a = stack.pop("MOD")
+            if b == 0:
+                raise VMDivisionByZero()
+            stack.push(a % b)
         elif op == Op.NEG:
             a = stack.pop("NEG")
             stack.push(-a)
-
         elif op == Op.NOT:
             a = stack.pop("NOT")
             stack.push(not a)
@@ -169,22 +168,22 @@ class VM:
         # ---------- 比较 ----------
         elif op == Op.EQ:
             b = stack.pop("EQ"); a = stack.pop("EQ")
-            stack.push(self._op_eq(a, b))
+            stack.push(a == b)
         elif op == Op.NEQ:
             b = stack.pop("NEQ"); a = stack.pop("NEQ")
-            stack.push(not self._op_eq(a, b))
+            stack.push(a != b)
         elif op == Op.LT:
             b = stack.pop("LT"); a = stack.pop("LT")
-            stack.push(self._op_lt(a, b))
+            stack.push(a < b)
         elif op == Op.GT:
             b = stack.pop("GT"); a = stack.pop("GT")
-            stack.push(self._op_lt(b, a))
+            stack.push(a > b)
         elif op == Op.LE:
             b = stack.pop("LE"); a = stack.pop("LE")
-            stack.push(not self._op_lt(b, a))
+            stack.push(a <= b)
         elif op == Op.GE:
             b = stack.pop("GE"); a = stack.pop("GE")
-            stack.push(not self._op_lt(a, b))
+            stack.push(a >= b)
 
         # ---------- 分支 ----------
         elif op == Op.JUMP:
@@ -211,6 +210,11 @@ class VM:
         elif op == Op.SWAP:
             stack.swap()
 
+        # ---------- 函数调用 ----------
+        elif op == Op.INVOKE_STATIC:
+            func_idx = self._read_u2(frame)
+            self._do_invoke_static(func_idx, frame)
+
         # ---------- 内置 ----------
         elif op == Op.PRINT:
             v = stack.pop("PRINT")
@@ -226,17 +230,43 @@ class VM:
             self.frames.pop()
             if self.frames:
                 self.frames[-1].stack.push(frame.return_value)
-            else:
-                return
 
         elif op == Op.RETURN_VOID:
             frame.return_value = None
             self.frames.pop()
-            if self.frames:
-                self.frames[-1].stack.push(None)
+            # Void 不压栈
 
         else:
             raise VMError("MCE5007", f"未实现的指令: {op.name}")
+
+    # ============================================================
+    # 静态函数调用
+    # ============================================================
+    def _do_invoke_static(self, func_idx, caller_frame):
+        if func_idx >= len(self.ct.functions):
+            raise VMError("MCE5008", f"函数索引越界: {func_idx}")
+
+        fd = self.ct.functions[func_idx]
+        desc_str = self.cp.resolve_string(fd.descriptor_idx)
+        desc = parse_descriptor(desc_str)
+
+        n_params = len(desc.params) if desc.kind == "method" else 0
+
+        # 弹参数（逆序）
+        args = []
+        for _ in range(n_params):
+            args.append(caller_frame.stack.pop("INVOKE_STATIC"))
+        args.reverse()
+
+        # 建新帧
+        new_frame = Frame(fd.code_offset, fd.local_count,
+                          this=None, method_ref=fd)
+        new_frame.code_end = fd.code_offset + fd.code_length
+        for i, a in enumerate(args):
+            if i < len(new_frame.locals):
+                new_frame.locals[i] = a
+
+        self.frames.append(new_frame)
 
     # ============================================================
     # 读取操作数
@@ -272,33 +302,4 @@ class VM:
             return c.value
         if c.tag == ConstTag.NULL:
             return None
-        # CLASS_REF / METHOD_REF 等——先不管
         return c.value
-
-    # ============================================================
-    # 算术辅助
-    # ============================================================
-    def _op_add(self, a, b):
-        return a + b
-
-    def _op_sub(self, a, b):
-        return a - b
-
-    def _op_mul(self, a, b):
-        return a * b
-
-    def _op_div(self, a, b):
-        if b == 0:
-            raise VMDivisionByZero()
-        return a / b
-
-    def _op_mod(self, a, b):
-        if b == 0:
-            raise VMDivisionByZero()
-        return a % b
-
-    def _op_eq(self, a, b):
-        return a == b
-
-    def _op_lt(self, a, b):
-        return a < b
