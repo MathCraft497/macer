@@ -65,6 +65,7 @@ class TokenType(Enum):
     LBRACKET = auto()
     RBRACKET = auto()
     ARROW = auto()
+    AT = auto()
 
     EOF = auto()
 
@@ -96,7 +97,6 @@ KEYWORDS = {
 TYPE_KEYWORDS = {
     "Int": TokenType.TYPE_INT,
     "Float": TokenType.TYPE_FLOAT,
-    "String": TokenType.TYPE_STRING,
     "Bool": TokenType.TYPE_BOOL,
     "Void": TokenType.TYPE_VOID,
     "Any": TokenType.TYPE_ANY,

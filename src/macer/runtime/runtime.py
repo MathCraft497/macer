@@ -7,8 +7,21 @@ import sys
 import builtins
 
 
-def print(*args):        # noqa: A001
-    builtins.print(*args)
+def print(*args):
+    converted = []
+    for a in args:
+        if hasattr(a, "chars") and isinstance(a.chars, list):
+            chars = []
+            for c in a.chars:
+                if hasattr(c, "chars") and isinstance(c.chars, list):
+                    # 嵌套 String，递归
+                    chars.append("".join(str(x) for x in c.chars))
+                else:
+                    chars.append(str(c))
+            converted.append("".join(chars))
+        else:
+            converted.append(a)
+    builtins.print(*converted)
 
 
 def len(x):              # noqa: A001
@@ -20,7 +33,12 @@ def len(x):              # noqa: A001
 
 
 def str(v):              # noqa: A001
-    return builtins.str(v)
+    """转字符串——返回 String 类实例（如果存在）"""
+    s = builtins.str(v)
+    cls = _get_string_class()
+    if cls is not None:
+        return cls(list(s))
+    return s
 
 
 def int(v):              # noqa: A001
@@ -89,3 +107,65 @@ def _emit(code, message):
         f"{RED}error{RESET}{BOLD}[{code}]{RESET}: {message}",
         file=sys.stderr,
     )
+
+
+
+
+
+# ============================================================
+# Char 方法实现
+# ============================================================
+def _char_toInt(c):
+    """Char -> Int（码点）"""
+    return ord(c)
+
+
+def _char_toString(c):
+    """Char -> String（单字符字符串）"""
+    return c
+
+
+def _char_toUpper(c):
+    """Char -> Char（大写）"""
+    return c.upper()
+
+
+def _char_toLower(c):
+    """Char -> Char（小写）"""
+    return c.lower()
+
+
+
+
+# ============================================================
+# String 类包装支持
+# ============================================================
+_STRING_CLASS = None
+
+
+def __set_string_class(cls):
+    global _STRING_CLASS
+    _STRING_CLASS = cls
+
+
+def _get_string_class():
+    return _STRING_CLASS
+
+
+def _builtins_str(v):
+    return builtins.str(v)
+
+
+def _str_from_chars(chars):
+    cls = _get_string_class()
+    if cls is not None:
+        return cls(list(chars))
+    return "".join(chars)
+
+
+def _chars_of(v):
+    if hasattr(v, "chars") and isinstance(v.chars, list):
+        return list(v.chars)
+    if isinstance(v, str):
+        return list(v)
+    return list(builtins.str(v))

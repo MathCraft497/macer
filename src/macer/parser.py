@@ -181,19 +181,33 @@ class Parser:
 
         fields, methods = [], []
         while not self.check(TokenType.RBRACE, TokenType.EOF):
-            member_public = True
-            if self.match(TokenType.PUBLIC):
+            while not self.check(TokenType.RBRACE, TokenType.EOF):
                 member_public = True
-            elif self.match(TokenType.PRIVATE):
-                member_public = False
+                if self.match(TokenType.PUBLIC):
+                    member_public = True
+                elif self.match(TokenType.PRIVATE):
+                    member_public = False
 
-            if self.check(TokenType.FUNC):
-                methods.append(self.parse_func(member_public, is_method=True))
-            elif self.check(TokenType.IDENT):
-                fields.append(self.parse_field(member_public))
-            else:
-                self._err(ErrCode.PARSE_UNEXPECTED,
-                          "类体中期待字段或方法声明")
+                # @overload 装饰
+                overload = False
+                if self.check(TokenType.AT):
+                    self.pos += 1
+                    # 期望 @overload
+                    if self.check(TokenType.IDENT) and self.peek().value == "overload":
+                        self.pos += 1
+                        overload = True
+                    else:
+                        self._err(ErrCode.PARSE_UNEXPECTED,
+                                  "期望 @overload 装饰器")
+
+                if self.check(TokenType.FUNC):
+                    methods.append(self.parse_func(member_public, is_method=True,
+                                                   overload=overload))
+                elif self.check(TokenType.IDENT):
+                    fields.append(self.parse_field(member_public))
+                else:
+                    self._err(ErrCode.PARSE_UNEXPECTED,
+                              "类体中期待字段或方法声明")
 
         self.expect(TokenType.RBRACE, "类体结束")
         return ast.ClassDecl(name, parent, fields, methods, is_public,
@@ -260,7 +274,7 @@ class Parser:
         self.pos = saved
         return None
 
-    def parse_func(self, is_public=True, is_method=False):
+    def parse_func(self, is_public=True, is_method=False, overload=False):
         tok = self.expect(TokenType.FUNC)
         line, col = tok.line, tok.col
 
@@ -289,7 +303,8 @@ class Parser:
             body = self.parse_block()
 
         return ast.FuncDecl(name, params, return_type, body,
-                            is_method, is_public, line, col, op_key)
+                            is_method, is_public, line, col, op_key,
+                            overload)
 
     def parse_param(self):
         name = self.expect(TokenType.IDENT).value
@@ -442,13 +457,14 @@ class Parser:
         return self.parse_postfix()
 
     # ---------- 方括号切片：读取原始文本 ----------
-    def parse_bracket_raw(self):
-        """obj[原始文本] —— 从源码里切出 `[` `]` 之间的字符串"""
+    def parse_bracket_dual(self):
+        """解析 [xxx]，同时得到 raw 字符串和 expr 表达式"""
         lb = self.expect(TokenType.LBRACKET)
         line, col = lb.line, lb.col
-        start_pos = lb.end_pos            # `[` 之后的第一个字符位置
+        start_pos = lb.end_pos
+        start_tok_pos = self.pos
 
-        # 从 token 流扫描，找到匹配的 `]`
+        # ① 扫描到匹配 ]
         depth = 1
         end_tok = None
         while self.pos < len(self.tokens):
@@ -465,18 +481,26 @@ class Parser:
         if end_tok is None:
             self._err(ErrCode.PARSE_UNEXPECTED, "缺少匹配的 ]", lb)
 
-        # 从源码切出 [start_pos, end_tok.start_pos)
+        # ② 提取原始文本
         if self.source:
-            raw = self.source[start_pos:end_tok.start_pos]
+            raw = self.source[start_pos:end_tok.start_pos].strip()
         else:
-            raw = "".join(
-                str(t.value) for t in self.tokens
-                if start_pos <= t.start_pos < end_tok.start_pos
-            )
+            raw = ""
 
-        self.pos += 1    # 跳过 RBRACKET
-        raw = raw.strip()
-        return ast.SliceStringExpr(raw, line, col)
+        # ③ 回到开头，解析表达式
+        saved_pos = self.pos
+        self.pos = start_tok_pos
+        try:
+            expr = self.parse_expression()
+        except MacerCompileError:
+            # 解析表达式失败——可能里面是特殊语法
+            # 用 SliceStringExpr 占位
+            expr = ast.SliceStringExpr(raw, line, col)
+
+        # ④ 跳到 ] 后面
+        self.pos = saved_pos + 1
+
+        return raw, expr, line, col
 
     def parse_postfix(self):
         expr = self.parse_primary()
@@ -492,8 +516,8 @@ class Parser:
                 else:
                     expr = ast.FieldAccess(expr, name, dot_tok.line, dot_tok.col)
             elif self.check(TokenType.LBRACKET):
-                idx = self.parse_bracket_raw()
-                expr = ast.IndexExpr(expr, idx, idx.line, idx.col)
+                raw, idx_expr, ln, cl = self.parse_bracket_dual()
+                expr = ast.IndexExpr(expr, idx_expr, raw, ln, cl)
             elif self.check(TokenType.LPAREN):
                 lp = self.peek()
                 args = self.parse_args()

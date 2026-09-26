@@ -1,75 +1,108 @@
-"""修复 _topo_sort_classes 让隐式继承 Object 的类排到 Object 之后"""
+# -*- coding: utf-8 -*-
+"""阶段 3.2：变量 + 赋值"""
 from pathlib import Path
 
-p = Path("src/macer/codegen.py")
+ROOT = Path(__file__).parent
+p = ROOT / "src/macer/codegen_bytecode.py"
 src = p.read_text(encoding="utf-8")
 
-old = '''    def _topo_sort_classes(self):
-        visited = set()
-        result = []
+# ---------- 1. 加 VarDecl ----------
+if "isinstance(s, ast.VarDecl)" not in src:
+    old = """        raise BytecodeCodeGenError(
+            f"阶段 3.1 暂不支持的语句：{type(s).__name__}")"""
+    new = """        if isinstance(s, ast.VarDecl):
+            if s.init is not None:
+                self._gen_expr(s.init)
+            else:
+                self.writer.emit(Op.LOAD_NULL)
+            slot = self._alloc_local(s.name)
+            self.writer.emit(Op.STORE_LOCAL, slot)
+            return
 
-        def visit(fqn):
-            if fqn in visited:
-                return
-            visited.add(fqn)
-            decl = self.classes[fqn]
-            if decl.parent:
-                parent_fqn = self._resolve_parent_fqn(
-                    decl.parent, self.class_pkg[fqn])
-                if parent_fqn and parent_fqn in self.classes:
-                    visit(parent_fqn)
-            result.append(fqn)
-
-        for fqn in self.classes:
-            visit(fqn)
-        return result'''
-
-new = '''    def _topo_sort_classes(self):
-        """拓扑排序：父类先出。
-
-        注意：类可能显式 `extends X`，也可能隐式继承 `macer.lang.Object`。
-        两者都要考虑，否则子类会排在 Object 之前。
-        """
-        visited = set()
-        result = []
-
-        def visit(fqn):
-            if fqn in visited:
-                return
-            visited.add(fqn)
-            decl = self.classes[fqn]
-
-            # 解析父类（显式或隐式）
-            parent_fqn = None
-            if decl.parent:
-                parent_fqn = self._resolve_parent_fqn(
-                    decl.parent, self.class_pkg[fqn])
-            elif fqn != self.OBJECT_FQN and self.OBJECT_FQN in self.classes:
-                # 隐式继承 macer.lang.Object
-                parent_fqn = self.OBJECT_FQN
-
-            # 递归访问父类
-            if parent_fqn and parent_fqn in self.classes:
-                visit(parent_fqn)
-
-            result.append(fqn)
-
-        # 先访问 Object（让它一定排在最前）
-        if self.OBJECT_FQN in self.classes:
-            visit(self.OBJECT_FQN)
-
-        for fqn in self.classes:
-            visit(fqn)
-        return result'''
-
-if old in src:
-    src = src.replace(old, new, 1)
-    p.write_text(src, encoding="utf-8")
-    print("OK  _topo_sort_classes 已修复")
+        raise BytecodeCodeGenError(
+            f"阶段 3.2 暂不支持的语句：{type(s).__name__}")"""
+    if old in src:
+        src = src.replace(old, new, 1)
+        print("OK  加 VarDecl")
+    else:
+        print("WARN  VarDecl 未匹配（先检查 _gen_stmt）")
 else:
-    print("FAIL  未匹配，尝试手动改（见文档）")
-    print()
-    print("=== 当前 _topo_sort_classes ===")
-    i = src.find("def _topo_sort_classes")
-    j = src.find("\n    def ", i + 10)
-    print(src[i:j])
+    print("SKIP VarDecl 已存在")
+
+# ---------- 2. 加 Ident ----------
+if "self.local_slots.get(e.name)" not in src:
+    old = """        # ---------- 二元运算 ----------
+        if isinstance(e, ast.Binary):"""
+    new = """        # ---------- 标识符 ----------
+        if isinstance(e, ast.Ident):
+            slot = self.local_slots.get(e.name)
+            if slot is None:
+                raise BytecodeCodeGenError(f"未定义变量: {e.name}")
+            self.writer.emit(Op.LOAD_LOCAL, slot)
+            return
+
+        # ---------- 赋值 ----------
+        if isinstance(e, ast.Assign):
+            if not isinstance(e.target, ast.Ident):
+                raise BytecodeCodeGenError(
+                    "阶段 3.2 只支持变量赋值")
+            self._gen_expr(e.value)
+            self.writer.emit(Op.DUP)
+            slot = self.local_slots.get(e.target.name)
+            if slot is None:
+                raise BytecodeCodeGenError(
+                    f"未定义变量: {e.target.name}")
+            self.writer.emit(Op.STORE_LOCAL, slot)
+            return
+
+        # ---------- 二元运算 ----------
+        if isinstance(e, ast.Binary):"""
+    if old in src:
+        src = src.replace(old, new, 1)
+        print("OK  加 Ident + Assign")
+    else:
+        print("WARN  Ident 未匹配（先检查 _gen_expr）")
+else:
+    print("SKIP Ident 已存在")
+
+p.write_text(src, encoding="utf-8")
+print()
+print("完成。请把以下测试追加到 tests/test_codegen_bytecode.py：")
+print()
+print('''
+def test_let():
+    out = _compile_and_run("""
+func main() -> Void {
+    let a: Int = 1;
+    let b: Int = 2;
+    print(a + b);
+}
+""")
+    assert out == "3\\n", f"输出: {out!r}"
+    print("OK  test_let")
+
+
+def test_var_assign():
+    out = _compile_and_run("""
+func main() -> Void {
+    var c: Int = 10;
+    c = c + 5;
+    print(c);
+}
+""")
+    assert out == "15\\n", f"输出: {out!r}"
+    print("OK  test_var_assign")
+
+
+def test_let_chain():
+    out = _compile_and_run("""
+func main() -> Void {
+    let a: Int = 1;
+    let b: Int = a + 1;
+    let c: Int = a + b;
+    print(c);
+}
+""")
+    assert out == "3\\n", f"输出: {out!r}"
+    print("OK  test_let_chain")
+''')

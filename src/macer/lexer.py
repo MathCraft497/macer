@@ -184,6 +184,7 @@ class Lexer:
                 ")": TokenType.RPAREN, "{": TokenType.LBRACE,
                 "}": TokenType.RBRACE, "[": TokenType.LBRACKET,
                 "]": TokenType.RBRACKET,
+                "@": TokenType.AT,
             }
             if ch in single:
                 self.advance()

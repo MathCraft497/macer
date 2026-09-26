@@ -22,6 +22,12 @@ class Expr:
     line: int = 0
     col: int = 0
 
+@dataclass
+class CharLit(Expr):
+    value: str
+    line: int = 0
+    col: int = 0
+
 
 @dataclass
 class IntLit(Expr):
@@ -53,6 +59,12 @@ class BoolLit(Expr):
 
 @dataclass
 class NullLit(Expr):
+    line: int = 0
+    col: int = 0
+
+@dataclass
+class ArrayLit(Expr):
+    elements: List[Expr]
     line: int = 0
     col: int = 0
 
@@ -131,8 +143,10 @@ class SliceStringExpr(Expr):
 class IndexExpr(Expr):
     obj: Expr
     index: Expr
+    raw_text: str = ""
     line: int = 0
     col: int = 0
+    is_array_index: bool = False    # ← TypeChecker 填
 
 
 @dataclass
@@ -214,6 +228,7 @@ class FuncDecl:
     line: int = 0
     col: int = 0
     operator: Optional[str] = None
+    overload: bool = False          # ← 加这行
 
 
 @dataclass
