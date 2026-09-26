@@ -211,6 +211,86 @@ func main() -> Void {
     assert out == "15\n", f"输出: {out!r}"
     print("OK  test_while_sum")
 
+def test_class_new():
+    out = _compile_and_run("""
+class Point {
+    x: Int;
+    y: Int;
+}
+
+func main() -> Void {
+    let p: Point = new Point();
+    print(1);
+}
+""")
+    assert out == "1\n", f"输出: {out!r}"
+    print("OK  test_class_new")
+
+
+def test_field_assign():
+    out = _compile_and_run("""
+class Point {
+    x: Int;
+    y: Int;
+}
+
+func main() -> Void {
+    let p: Point = new Point();
+    p.x = 10;
+    p.y = 20;
+    print(p.x + p.y);
+}
+""")
+    assert out == "30\n", f"输出: {out!r}"
+    print("OK  test_field_assign")
+
+
+def test_method_call():
+    out = _compile_and_run("""
+class Point {
+    x: Int;
+    y: Int;
+
+    func sum() -> Int {
+        return self.x + self.y;
+    }
+}
+
+func main() -> Void {
+    let p: Point = new Point();
+    p.x = 3;
+    p.y = 4;
+    print(p.sum());
+}
+""")
+    assert out == "7\n", f"输出: {out!r}"
+    print("OK  test_method_call")
+
+
+def test_init():
+    out = _compile_and_run("""
+class Point {
+    x: Int;
+    y: Int;
+
+    func init(x: Int, y: Int) {
+        self.x = x;
+        self.y = y;
+    }
+
+    func sum() -> Int {
+        return self.x + self.y;
+    }
+}
+
+func main() -> Void {
+    let p: Point = new Point(3, 4);
+    print(p.sum());
+}
+""")
+    assert out == "7\n", f"输出: {out!r}"
+    print("OK  test_init")
+
 
 if __name__ == "__main__":
     tests = [
@@ -229,6 +309,10 @@ if __name__ == "__main__":
         test_if_else_chain,
         test_while,
         test_while_sum,
+        test_class_new,
+        test_field_assign,
+        test_method_call,
+        test_init,
     ]
     failed = 0
     for t in tests:

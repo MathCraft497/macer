@@ -10,6 +10,15 @@ from .frame import Frame
 from .builtins import Builtins
 
 
+class VMObject:
+    def __init__(self, class_idx, class_def):
+        self.class_idx = class_idx
+        self.class_def = class_def
+        self.fields = {}
+
+    def __repr__(self):
+        return f"<{self.class_def} at {hex(id(self))}>"
+
 class VM:
     def __init__(self, bytecode_source):
         """
@@ -124,6 +133,30 @@ class VM:
             stack.push(False)
         elif op == Op.LOAD_NULL:
             stack.push(None)
+        elif op == Op.LOAD_FIELD:
+            field_ref = self._read_u2(frame)
+            obj = stack.pop("LOAD_FIELD")
+            c = self.cp.get(field_ref)
+            if c.tag != ConstTag.FIELD_REF:
+                raise VMError("MCE5013", f"不是字段引用: {field_ref}")
+            _, name_idx, _ = c.parts
+            name = self.cp.resolve_string(name_idx)
+            if not isinstance(obj, VMObject):
+                raise VMTypeError(f"不是对象: {type(obj).__name__}")
+            stack.push(obj.fields.get(name))
+        elif op == Op.STORE_FIELD:
+            field_ref = self._read_u2(frame)
+            value = stack.pop("STORE_FIELD")
+            obj = stack.pop("STORE_FIELD")
+            c = self.cp.get(field_ref)
+            if c.tag != ConstTag.FIELD_REF:
+                raise VMError("MCE5013", f"不是字段引用: {field_ref}")
+            _, name_idx, _ = c.parts
+            name = self.cp.resolve_string(name_idx)
+            if not isinstance(obj, VMObject):
+                raise VMTypeError(f"不是对象: {type(obj).__name__}")
+            obj.fields[name] = value
+            stack.push(value)  # 赋值也是表达式
 
         # ---------- 变量 ----------
         elif op == Op.LOAD_LOCAL:
@@ -224,6 +257,18 @@ class VM:
             v = stack.pop("TO_STRING")
             stack.push(Builtins.to_display(v))
 
+        elif op == Op.NEW:
+            cls_idx = self._read_u2(frame)
+            if cls_idx >= len(self.ct.classes):
+                raise VMError("MCE5010", f"类索引越界: {cls_idx}")
+            cls = self.ct.classes[cls_idx]
+            obj = VMObject(cls_idx, cls)
+            stack.push(obj)
+
+        elif op == Op.INVOKE:
+            method_ref = self._read_u2(frame)
+            self._do_invoke(method_ref, frame)
+
         # ---------- 返回 ----------
         elif op == Op.RETURN:
             frame.return_value = stack.pop("RETURN")
@@ -267,6 +312,64 @@ class VM:
                 new_frame.locals[i] = a
 
         self.frames.append(new_frame)
+
+    def _do_invoke(self, method_ref, caller_frame):
+        # 取 method_ref
+        c = self.cp.get(method_ref)
+        if c.tag != ConstTag.METHOD_REF:
+            raise VMError("MCE5011", f"不是方法引用: {method_ref}")
+        cls_name_idx, name_idx, desc_idx = c.parts
+        name = self.cp.resolve_string(name_idx)
+        desc_str = self.cp.resolve_string(desc_idx)
+        desc = parse_descriptor(desc_str)
+        n_params = len(desc.params)
+
+        # 弹参数
+        args = []
+        for _ in range(n_params):
+            args.append(caller_frame.stack.pop("INVOKE"))
+        args.reverse()
+
+        # 弹 this
+        this = caller_frame.stack.pop("INVOKE")
+
+        # 找方法
+        md = self._find_method(this, name, desc_str)
+        if md is None:
+            raise VMError("MCE5012", f"找不到方法 {name}{desc_str}")
+
+        # 建新帧
+        new_frame = Frame(md.code_offset, md.local_count,
+                          this=this, method_ref=md)
+        new_frame.code_end = md.code_offset + md.code_length
+        new_frame.locals[0] = this  # slot 0 = self
+        for i, a in enumerate(args):
+            if i + 1 < len(new_frame.locals):
+                new_frame.locals[i + 1] = a
+
+        # 记录返回是否压栈
+        new_frame.is_void = (desc.ret.kind == "primitive" and
+                             desc.ret.name == "Void")
+
+        self.frames.append(new_frame)
+
+    def _find_method(self, this, name, desc_str):
+        # 从 this 的类开始，沿继承链
+        cls_idx = this.class_idx
+        visited = set()
+        while cls_idx is not None and cls_idx not in visited:
+            visited.add(cls_idx)
+            cls = self.ct.classes[cls_idx]
+            for m in cls.methods:
+                mname = self.cp.resolve_string(m.name_idx)
+                mdesc = self.cp.resolve_string(m.descriptor_idx)
+                if mname == name and mdesc == desc_str:
+                    return m
+            # 父类
+            if cls.parent_idx == 0xFFFF:
+                break
+            cls_idx = cls.parent_idx
+        return None
 
     # ============================================================
     # 读取操作数

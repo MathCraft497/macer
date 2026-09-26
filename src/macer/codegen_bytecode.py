@@ -41,15 +41,41 @@ class BytecodeCodeGen:
     # ============================================================
     def generate(self) -> BytecodeWriter:
         # 1. 收集所有顶层函数
+        all_classes = []
         top_funcs = []
         for unit in self.units:
             pkg = unit.package
             for d in unit.program.declarations:
-                if isinstance(d, ast.FuncDecl):
+                if isinstance(d, ast.ClassDecl):
+                    fqn = f"{pkg}.{d.name}" if pkg else d.name
+                    all_classes.append((fqn, d))
+                elif isinstance(d, ast.FuncDecl):
                     fqn = f"{pkg}.{d.name}" if pkg else d.name
                     top_funcs.append((fqn, d))
 
-        # 2. 先占位（code_offset=0）
+        # 2. 占位：类表 + 方法表
+        for fqn, cls in all_classes:
+            name_idx = self.writer.cp.add_string(fqn)
+            parent_idx = 0xFFFF
+            cls_idx = self.writer.ct.add_class(name_idx, parent_idx)
+            self.class_map[fqn] = cls_idx
+
+            # 字段
+            for f in cls.fields:
+                fn_idx = self.writer.cp.add_string(f.name)
+                ft_idx = self.writer.cp.add_string(str(f.type_node))
+                self.writer.ct.add_field(cls_idx, fn_idx, ft_idx, 1)
+
+            # 方法签名
+            for m in cls.methods:
+                mname_idx = self.writer.cp.add_string(m.name)
+                mdesc = self._make_method_descriptor(m)
+                mdesc_idx = self.writer.cp.add_string(mdesc)
+                self.writer.ct.add_method(cls_idx, mname_idx, mdesc_idx,
+                                           code_offset=0, code_length=0,
+                                           local_count=0)
+
+        # 3. 先占位（code_offset=0）
         for fqn, fn in top_funcs:
             name_idx = self.writer.cp.add_string(fn.name)
             desc = self._make_descriptor(fn)
@@ -60,12 +86,18 @@ class BytecodeCodeGen:
             )
             self.func_map[fqn] = func_idx  # ★ 关键！
 
-        # 3. 逐个生成函数体，回填
+        # 4. 生成方法体
+        for fqn, cls in all_classes:
+                cls_idx = self.class_map[fqn]
+                for mi, m in enumerate(cls.methods):
+                    self._gen_method(fqn, cls_idx, mi, m)
+
+        # 5. 逐个生成函数体，回填
         for fqn, fn in top_funcs:
             func_idx = self.func_map[fqn]
             self._gen_function(fqn, fn, func_idx)
 
-        # 4. entry_main
+        # 6. entry_main
         if "main" in self.func_map:
             self.writer.entry_main = self.func_map["main"]
         elif top_funcs:
@@ -97,9 +129,25 @@ class BytecodeCodeGen:
         fd.code_length = code_end - code_start
         fd.local_count = self.next_slot
 
-    def _reset_locals(self, fn):
+    def _gen_method(self, cls_fqn, cls_idx, method_idx, m):
+        self._reset_locals(m, is_method=True)
+        code_start = self.writer.code_offset
+        for st in m.body:
+            self._gen_stmt(st)
+        self._auto_return(m.return_type)
+        code_end = self.writer.code_offset
+        # 回填
+        md = self.writer.ct.classes[cls_idx].methods[method_idx]
+        md.code_offset = code_start
+        md.code_length = code_end - code_start
+        md.local_count = self.next_slot
+
+    def _reset_locals(self, fn, is_method=False):
         self.local_slots = {}
         self.next_slot = 0
+        if is_method:
+            self.local_slots["self"] = 0
+            self.next_slot = 1
         for p in fn.params:
             self.local_slots[p.name] = self.next_slot
             self.next_slot += 1
@@ -119,6 +167,12 @@ class BytecodeCodeGen:
     def _make_descriptor(self, fn):
         params = [self._type_to_desc(p.type_node) for p in fn.params]
         ret = self._type_to_desc(fn.return_type)
+        return str(Descriptor.method(params, ret))
+
+    def _make_method_descriptor(self, m):
+        # 和 _make_descriptor 一样，但 self 不算参数
+        params = [self._type_to_desc(p.type_node) for p in m.params]
+        ret = self._type_to_desc(m.return_type)
         return str(Descriptor.method(params, ret))
 
     def _type_to_desc(self, t):
@@ -261,6 +315,43 @@ class BytecodeCodeGen:
             self.writer.emit(Op.LOAD_CONST, idx)
             return
 
+        if isinstance(e, ast.SelfExpr):
+            self.writer.emit(Op.LOAD_LOCAL, 0)
+            return
+
+        if isinstance(e, ast.NewExpr):
+            cls_idx = self.class_map.get(e.class_name)
+            if cls_idx is None:
+                # 尝试查找（简单名匹配）
+                for k in self.class_map:
+                    if k.endswith("." + e.class_name):
+                        cls_idx = self.class_map[k]
+                        break
+            if cls_idx is None:
+                raise BytecodeCodeGenError(f"未知类: {e.class_name}")
+
+            # NEW
+            self.writer.emit(Op.NEW, cls_idx)
+            self.writer.emit(Op.DUP)  # 保存 obj 引用
+
+            # 压参数
+            for a in e.args:
+                self._gen_expr(a)
+
+            # 调 init
+            init_ref = self._resolve_init_method_ref(cls_idx)
+            if init_ref is not None:
+                self.writer.emit(Op.INVOKE, init_ref)
+
+            return
+
+        if isinstance(e, ast.FieldAccess):
+            # obj.field
+            self._gen_expr(e.obj)
+            field_ref = self._resolve_field_ref(e.field)
+            self.writer.emit(Op.LOAD_FIELD, field_ref)
+            return
+
         # ---------- 标识符 ----------
         if isinstance(e, ast.Ident):
             slot = self.local_slots.get(e.name)
@@ -271,17 +362,27 @@ class BytecodeCodeGen:
 
         # ---------- 赋值 ----------
         if isinstance(e, ast.Assign):
-            if not isinstance(e.target, ast.Ident):
-                raise BytecodeCodeGenError(
-                    "阶段 3.2 只支持变量赋值")
-            self._gen_expr(e.value)
-            self.writer.emit(Op.DUP)
-            slot = self.local_slots.get(e.target.name)
-            if slot is None:
-                raise BytecodeCodeGenError(
-                    f"未定义变量: {e.target.name}")
-            self.writer.emit(Op.STORE_LOCAL, slot)
-            return
+            # 变量赋值
+            if isinstance(e.target, ast.Ident):
+                self._gen_expr(e.value)
+                self.writer.emit(Op.DUP)
+                slot = self.local_slots.get(e.target.name)
+                if slot is None:
+                    raise BytecodeCodeGenError(
+                        f"未定义变量: {e.target.name}")
+                self.writer.emit(Op.STORE_LOCAL, slot)
+                return
+
+            # 字段赋值：obj.field = value
+            if isinstance(e.target, ast.FieldAccess):
+                self._gen_expr(e.target.obj)  # obj
+                self._gen_expr(e.value)  # value
+                field_ref = self._resolve_field_ref(e.target.field)
+                self.writer.emit(Op.STORE_FIELD, field_ref)
+                return
+
+            raise BytecodeCodeGenError(
+                f"不支持的赋值目标: {type(e.target).__name__}")
 
         # ---------- 二元运算 ----------
         if isinstance(e, ast.Binary):
@@ -303,11 +404,56 @@ class BytecodeCodeGen:
 
         # ---------- 调用 ----------
         if isinstance(e, ast.Call):
+            if isinstance(e.callee, ast.FieldAccess):
+                # obj.method(args)
+                self._gen_expr(e.callee.obj)  # this
+                for a in e.args:
+                    self._gen_expr(a)
+                method_ref = self._resolve_method_ref(e.callee)
+                self.writer.emit(Op.INVOKE, method_ref)
+                return
             self._gen_call(e)
             return
 
         raise BytecodeCodeGenError(
             f"阶段 3.1 暂不支持的表达式：{type(e).__name__}")
+
+    def _resolve_method_ref(self, field_access):
+        # 简化：假设 obj 是 self 或 new 的类——找任意类里的同名方法
+        method_name = field_access.field
+        for fqn, cls_idx in self.class_map.items():
+            cls = self.writer.ct.classes[cls_idx]
+            for m in cls.methods:
+                name = self.writer.cp.resolve_string(m.name_idx)
+                if name == method_name:
+                    desc = self.writer.cp.resolve_string(m.descriptor_idx)
+                    return self.writer.cp.add_method_ref(fqn, method_name, desc)
+        raise BytecodeCodeGenError(f"未知方法: {method_name}")
+
+    def _resolve_field_ref(self, field_name):
+        # 简化：假设 obj 是 self 或 new 的类
+        # 直接从常量池找匹配的 FIELD_REF
+        # 阶段 3 简化：找任意类里的同名字段
+        for fqn, cls_idx in self.class_map.items():
+            cls = self.writer.ct.classes[cls_idx]
+            for f in cls.fields:
+                fn = self.writer.cp.resolve_string(f.name_idx)
+                if fn == field_name:
+                    ft = self.writer.cp.resolve_string(f.type_idx)
+                    return self.writer.cp.add_field_ref(fqn, field_name, ft)
+        raise BytecodeCodeGenError(f"未知字段: {field_name}")
+
+    def _resolve_init_method_ref(self, cls_idx):
+        cls = self.writer.ct.classes[cls_idx]
+        for m in cls.methods:
+            name = self.writer.cp.resolve_string(m.name_idx)
+            if name == "init":
+                # 找常量池里的 METHOD_REF
+                cls_name = self.writer.cp.resolve_string(cls.name_idx)
+                desc = self.writer.cp.resolve_string(m.descriptor_idx)
+                return self.writer.cp.add_method_ref(cls_name, "init", desc)
+        return None
+
 
     def _emit_bin_op(self, op, node):
         table = {
